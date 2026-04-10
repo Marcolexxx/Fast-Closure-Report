@@ -10,9 +10,8 @@
 
 ---
 
-`<span id="-简体中文">`
 
-## 🇨🇳 简体中文
+## 简体中文
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)]()
@@ -131,9 +130,8 @@ sequenceDiagram
 
 ---
 
-`<span id="-english">`
 
-## 🇺🇸 English
+## English
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)]()
