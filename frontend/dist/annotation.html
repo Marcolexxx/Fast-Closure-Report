@@ -1,0 +1,378 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AnnotationCanvas - AI-Copilot</title>
+    <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+    <style>
+      :root {
+        --bg: #050816;
+        --panel: #0b1020;
+        --border: rgba(255, 255, 255, 0.1);
+        --accent: #6aa9ff;
+        --text: #e6edf3;
+        --muted: rgba(230, 237, 243, 0.7);
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial;
+        background: radial-gradient(circle at top, #111827 0, #050816 55%, #020617 100%);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(11, 16, 32, 0.9);
+        backdrop-filter: blur(6px);
+      }
+      .topbar .title {
+        font-weight: 700;
+      }
+      .topbar .meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+        gap: 10px;
+        flex: 1;
+        padding: 10px 14px 14px;
+        box-sizing: border-box;
+      }
+      .panel {
+        background: var(--panel);
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        padding: 10px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+      #canvasWrap {
+        flex: 1;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #000;
+        position: relative;
+      }
+      #c {
+        width: 100%;
+        height: 100%;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .btn {
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text);
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .btn.primary {
+        border-color: var(--accent);
+        background: rgba(106, 169, 255, 0.1);
+      }
+      .btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .list {
+        flex: 1;
+        overflow: auto;
+        font-size: 12px;
+      }
+      .list pre {
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .status {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div>
+        <div class="title">AnnotationCanvas · 标注画板</div>
+        <div class="meta" id="metaTask">taskId=-</div>
+      </div>
+      <button class="btn" type="button" onclick="window.history.back()">返回工作台</button>
+    </div>
+    <div class="layout">
+      <div class="panel">
+        <div class="toolbar">
+          <button class="btn primary" id="btnRect" type="button">矩形</button>
+          <button class="btn" id="btnUndo" type="button" disabled>撤销</button>
+          <button class="btn" id="btnRedo" type="button" disabled>重做</button>
+          <button class="btn" id="btnReset" type="button">清空</button>
+          <button class="btn primary" id="btnSubmit" type="button" style="margin-left:auto;">提交标注</button>
+        </div>
+        <div id="canvasWrap">
+          <canvas id="c"></canvas>
+        </div>
+        <div class="status" id="status">加载中...</div>
+      </div>
+      <div class="panel">
+        <h2>当前标注（相对坐标）</h2>
+        <div class="list">
+          <pre id="jsonOut">[]</pre>
+        </div>
+        <div class="status" id="draftStatus">草稿尚未保存</div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const params = new URLSearchParams(window.location.search);
+        const taskId = params.get("taskId") || "t1";
+        const imageUrl = params.get("image") || "https://via.placeholder.com/900x600?text=Annotation+Canvas";
+        document.getElementById("metaTask").textContent = "taskId=" + taskId;
+
+        const draftKey = "aicopilot:annotation:" + taskId;
+        const statusEl = document.getElementById("status");
+        const draftStatusEl = document.getElementById("draftStatus");
+        const jsonOut = document.getElementById("jsonOut");
+
+        let canvas, bgImage;
+        let mode = "rect";
+        let drawingRect = null;
+        let isDown = false;
+        let undoStack = [];
+        let redoStack = [];
+
+        const btnRect = document.getElementById("btnRect");
+        const btnUndo = document.getElementById("btnUndo");
+        const btnRedo = document.getElementById("btnRedo");
+        const btnReset = document.getElementById("btnReset");
+        const btnSubmit = document.getElementById("btnSubmit");
+
+        function resizeCanvas() {
+          if (!canvas) return;
+          const wrap = document.getElementById("canvasWrap");
+          const w = wrap.clientWidth;
+          const h = wrap.clientHeight;
+          canvas.setWidth(w);
+          canvas.setHeight(h);
+          canvas.requestRenderAll();
+        }
+
+        function snapshot() {
+          // Push a snapshot for undo (simple but ok for MVP).
+          const json = canvas.toDatalessJSON(["isBg"]);
+          undoStack.push(json);
+          if (undoStack.length > 50) undoStack.shift();
+          redoStack = [];
+          btnUndo.disabled = undoStack.length === 0;
+          btnRedo.disabled = redoStack.length === 0;
+        }
+
+        function restoreFrom(json) {
+          canvas.loadFromJSON(json, () => {
+            canvas.renderAll();
+            updateOutput();
+          });
+        }
+
+        btnUndo.onclick = () => {
+          if (!undoStack.length) return;
+          const current = canvas.toDatalessJSON(["isBg"]);
+          redoStack.push(current);
+          const state = undoStack.pop();
+          restoreFrom(state);
+          btnUndo.disabled = undoStack.length === 0;
+          btnRedo.disabled = false;
+        };
+
+        btnRedo.onclick = () => {
+          if (!redoStack.length) return;
+          const current = canvas.toDatalessJSON(["isBg"]);
+          undoStack.push(current);
+          const state = redoStack.pop();
+          restoreFrom(state);
+          btnRedo.disabled = redoStack.length === 0;
+          btnUndo.disabled = false;
+        };
+
+        btnReset.onclick = () => {
+          if (!canvas) return;
+          canvas.getObjects()
+            .filter((o) => !o.isBg)
+            .forEach((o) => canvas.remove(o));
+          snapshot();
+          updateOutput();
+        };
+
+        btnSubmit.onclick = () => {
+          saveDraft();
+          submitToBackend();
+        };
+
+        function toRelative(box, imgW, imgH) {
+          return {
+            x: +(box.left / imgW).toFixed(4),
+            y: +(box.top / imgH).toFixed(4),
+            w: +(box.width / imgW).toFixed(4),
+            h: +(box.height / imgH).toFixed(4),
+          };
+        }
+
+        function updateOutput() {
+          if (!bgImage) return;
+          const imgW = bgImage.width || 1;
+          const imgH = bgImage.height || 1;
+          const boxes = canvas
+            .getObjects()
+            .filter((o) => !o.isBg)
+            .map((o) => {
+              const b = o.getBoundingRect(true, true);
+              return toRelative(b, imgW, imgH);
+            });
+          jsonOut.textContent = JSON.stringify(boxes, null, 2);
+        }
+
+        function saveDraft() {
+          if (!canvas) return;
+          try {
+            const json = canvas.toDatalessJSON(["isBg"]);
+            localStorage.setItem(draftKey, JSON.stringify(json));
+            draftStatusEl.textContent = "草稿已保存 " + new Date().toLocaleTimeString();
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        async function submitToBackend() {
+          const boxes = JSON.parse(jsonOut.textContent || "[]");
+          statusEl.textContent = "提交中...";
+          try {
+            const res = await fetch(`/tasks/${encodeURIComponent(taskId)}/hil/submit`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ui_component: "AnnotationCanvas", data: { boxes, imageUrl } }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            statusEl.textContent = "已提交，任务将继续运行";
+          } catch (e) {
+            statusEl.textContent = "提交失败：" + (e && e.message ? e.message : String(e));
+          }
+        }
+
+        window.addEventListener("resize", () => {
+          resizeCanvas();
+        });
+
+        function init() {
+          const fabricCanvas = new fabric.Canvas("c", {
+            selection: false,
+          });
+          canvas = fabricCanvas;
+          resizeCanvas();
+
+          fabric.Image.fromURL(
+            imageUrl,
+            (img) => {
+              bgImage = img;
+              img.set({
+                left: 0,
+                top: 0,
+                selectable: false,
+                evented: false,
+                isBg: true,
+              });
+              const wrap = document.getElementById("canvasWrap");
+              const scale = Math.min(
+                wrap.clientWidth / img.width,
+                wrap.clientHeight / img.height
+              );
+              img.scale(scale);
+              canvas.add(img);
+              canvas.sendToBack(img);
+              snapshot();
+              statusEl.textContent = "单击并拖动创建矩形标注，支持撤销/重做。";
+
+              // Try restore draft
+              try {
+                const stored = localStorage.getItem(draftKey);
+                if (stored) {
+                  const json = JSON.parse(stored);
+                  canvas.loadFromJSON(json, () => {
+                    canvas.renderAll();
+                    snapshot();
+                    updateOutput();
+                    draftStatusEl.textContent = "已从草稿恢复";
+                  });
+                }
+              } catch (e) {
+                // ignore
+              }
+            },
+            { crossOrigin: "anonymous" }
+          );
+
+          canvas.on("mouse:down", (opt) => {
+            if (mode !== "rect") return;
+            isDown = true;
+            const pointer = canvas.getPointer(opt.e);
+            const rect = new fabric.Rect({
+              left: pointer.x,
+              top: pointer.y,
+              width: 0,
+              height: 0,
+              fill: "rgba(106,169,255,0.16)",
+              stroke: "#6aa9ff",
+              strokeWidth: 2,
+              strokeUniform: true,
+            });
+            drawingRect = rect;
+            canvas.add(rect);
+          });
+
+          canvas.on("mouse:move", (opt) => {
+            if (!isDown || !drawingRect) return;
+            const pointer = canvas.getPointer(opt.e);
+            drawingRect.set({
+              width: Math.abs(pointer.x - drawingRect.left),
+              height: Math.abs(pointer.y - drawingRect.top),
+            });
+            canvas.renderAll();
+          });
+
+          canvas.on("mouse:up", () => {
+            if (!drawingRect) return;
+            isDown = false;
+            if (drawingRect.width < 5 || drawingRect.height < 5) {
+              canvas.remove(drawingRect);
+            } else {
+              snapshot();
+              updateOutput();
+            }
+            drawingRect = null;
+          });
+        }
+
+        init();
+        setInterval(saveDraft, 30000);
+      })();
+    </script>
+  </body>
+</html>
+

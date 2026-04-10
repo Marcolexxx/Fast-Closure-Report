@@ -1,0 +1,26 @@
+fastapi
+uvicorn[standard]
+celery
+redis
+sqlalchemy[asyncio]
+asyncpg
+psycopg2-binary
+werkzeug
+aiosqlite
+pydantic-settings
+cryptography
+
+# Auth
+PyJWT>=2.8.0
+passlib[bcrypt]>=1.7.4
+
+# Skill A real impl
+aiohttp
+pandas
+openpyxl
+python-pptx
+pillow
+pdfplumber
+pytesseract
+python-multipart
+openai>=1.12.0

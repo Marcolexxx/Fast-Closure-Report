@@ -1,0 +1,26 @@
+﻿{
+  "id": "skill-event-report",
+  "name": "活动结案报告",
+  "version": "1.2.0",
+  "min_platform_version": "1.0.0",
+  "min_context_version": "1",
+  "description": "自动化生成活动物料核对结案 PPT 及凭据报告",
+  "icon": "FileBarChart",
+  "trigger_examples": ["帮我做结案报告", "处理这批活动照片"],
+  "required_roles": ["executor"],
+  "tools": [
+    { "name": "parse_excel", "timeout": 30, "type": "auto" },
+    { "name": "classify_assets", "timeout": 120, "type": "auto" },
+    { "name": "fetch_cloud_album", "timeout": 300, "type": "auto" },
+    { "name": "run_ai_detection", "timeout": 600, "type": "auto", "async": true },
+    { "name": "bind_design_images", "timeout": 0, "type": "human_in_loop", "ui": "DesignBinder" },
+    { "name": "request_annotation", "timeout": 0, "type": "human_in_loop", "ui": "AnnotationCanvas" },
+    { "name": "validate_quantity", "timeout": 10, "type": "auto" },
+    { "name": "ocr_receipt", "timeout": 60, "type": "auto" },
+    { "name": "match_receipts", "timeout": 30, "type": "auto" },
+    { "name": "request_receipt_confirm", "timeout": 0, "type": "human_in_loop", "ui": "ReceiptMatcher" },
+    { "name": "generate_ppt", "timeout": 180, "type": "auto" },
+    { "name": "submit_review", "timeout": 10, "type": "auto" }
+  ]
+}
+

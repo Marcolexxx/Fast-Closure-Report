@@ -1,0 +1,438 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Copilot Platform</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --text: #e6edf3;
+        --muted: rgba(230, 237, 243, 0.8);
+        --card: rgba(255, 255, 255, 0.04);
+        --border: rgba(255, 255, 255, 0.08);
+        --accent: #6aa9ff;
+        --warn: #ffb020;
+        --ok: #25d366;
+        --err: #ff4d4f;
+      }
+
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+          "Apple Color Emoji", "Segoe UI Emoji";
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        background: rgba(11, 16, 32, 0.9);
+        backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .brand {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      select {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 8px 10px;
+        outline: none;
+      }
+
+      .wrap {
+        padding: 28px 20px 80px;
+        max-width: 980px;
+        margin: 0 auto;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      .banner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 60;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 176, 32, 0.12);
+        color: var(--text);
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .banner strong {
+        color: var(--warn);
+      }
+
+      .banner .reason {
+        flex: 1;
+        min-width: 0;
+        color: rgba(255, 255, 255, 0.92);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .btn {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .float {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 70;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        cursor: pointer;
+      }
+
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        border: 2px solid rgba(230, 237, 243, 0.25);
+        border-top-color: var(--accent);
+        animation: spin 1s linear infinite;
+      }
+
+      .dot-ok {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: var(--ok);
+      }
+
+      .dot-err {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: var(--err);
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .float .meta {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.2;
+      }
+
+      .float .meta .label {
+        font-weight: 650;
+      }
+
+      .float .meta .sub {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .statusline {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .kvs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .kv {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .kv .k {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .kv .v {
+        margin-top: 4px;
+        font-weight: 650;
+        font-size: 14px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hilBanner" class="banner">
+      <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+        <strong>需要您操作</strong>
+        <div id="hilReason" class="reason">-</div>
+      </div>
+      <button class="btn" id="hilJumpBtn" type="button">去标注</button>
+    </div>
+
+    <div class="topbar">
+      <div class="brand">AI-Copilot Platform</div>
+      <div class="controls">
+        <label style="font-size: 13px; color: var(--muted);">Skill</label>
+        <select id="skillSelect" disabled>
+          <option value="skillA">活动结案报告（Skill A）</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="grid">
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; gap: 12px;">
+            <div>
+              <div style="font-weight: 750; font-size: 16px;">Agent 状态</div>
+              <div class="statusline" id="statusLine">连接中...</div>
+            </div>
+            <div style="text-align: right;">
+              <div class="statusline">TaskId</div>
+              <div style="font-weight: 750;" id="taskIdLabel">-</div>
+            </div>
+          </div>
+          <div class="kvs">
+            <div class="kv">
+              <div class="k">status</div>
+              <div class="v" id="kvStatus">-</div>
+            </div>
+            <div class="kv">
+              <div class="k">current_step</div>
+              <div class="v" id="kvStep">-</div>
+            </div>
+            <div class="kv">
+              <div class="k">trace_id</div>
+              <div class="v" id="kvTrace">-</div>
+            </div>
+            <div class="kv">
+              <div class="k">ws</div>
+              <div class="v" id="kvWs">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-weight: 750; font-size: 14px;">说明</div>
+          <div style="margin-top: 8px; color: var(--muted); line-height: 1.6; font-size: 13px;">
+            当前为 UI Shell 骨架：<code>ws://{location.host}/ws/task/{taskId}</code> 会推送状态变化（Hydration + task_update）。
+            你可以通过 URL <code>?taskId=...</code> 指定任务 ID。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="agentFloat" class="float" title="Agent 状态">
+      <div id="agentDot" class="spinner"></div>
+      <div class="meta">
+        <div id="agentLabel" class="label">AI 正在运行...</div>
+        <div id="agentSub" class="sub">-</div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const $ = (id) => document.getElementById(id);
+        const params = new URLSearchParams(window.location.search);
+        const taskId = params.get("taskId") || "t1";
+        $("taskIdLabel").textContent = taskId;
+
+        const hilBanner = $("hilBanner");
+        const hilReason = $("hilReason");
+        const hilJumpBtn = $("hilJumpBtn");
+
+        const kvStatus = $("kvStatus");
+        const kvStep = $("kvStep");
+        const kvTrace = $("kvTrace");
+        const kvWs = $("kvWs");
+        const statusLine = $("statusLine");
+
+        const agentFloat = $("agentFloat");
+        const agentDot = $("agentDot");
+        const agentLabel = $("agentLabel");
+        const agentSub = $("agentSub");
+
+        let lastStatus = null;
+
+        function setWsState(text) {
+          kvWs.textContent = text;
+          statusLine.textContent = text;
+        }
+
+        function showFloat(show) {
+          agentFloat.style.display = show ? "flex" : "none";
+        }
+
+        function setDot(mode) {
+          agentDot.classList.remove("spinner", "dot-ok", "dot-err");
+          if (mode === "ok") agentDot.classList.add("dot-ok");
+          else if (mode === "err") agentDot.classList.add("dot-err");
+          else agentDot.classList.add("spinner");
+        }
+
+        function setAgentUI(payload) {
+          const status = payload.status || "-";
+          const step = payload.current_step ?? "-";
+          const trace = payload.trace_id || "-";
+
+          kvStatus.textContent = status;
+          kvStep.textContent = String(step);
+          kvTrace.textContent = trace;
+
+          // PRD UI spec (simplified MVP)
+          if (status === "WAITING_HUMAN") {
+            window.__lastHilUi = payload.ui_component || window.__lastHilUi;
+            hilBanner.style.display = "flex";
+            const reason = payload.reasoning_summary || `步骤 ${step} 需要您确认`;
+            hilReason.textContent = reason.slice(0, 200);
+
+            agentLabel.textContent = "需要您操作";
+            agentSub.textContent = `步骤 ${step}`;
+            setDot("warn");
+            showFloat(false);
+          } else if (status === "COMPLETED") {
+            hilBanner.style.display = "none";
+            setDot("ok");
+            agentLabel.textContent = "已完成";
+            agentSub.textContent = "结案报告已生成";
+            showFloat(true);
+          } else if (status === "ERROR") {
+            hilBanner.style.display = "none";
+            setDot("err");
+            agentLabel.textContent = "发生错误";
+            agentSub.textContent = payload.error_code ? `错误: ${payload.error_code}` : "请重试";
+            showFloat(true);
+          } else {
+            hilBanner.style.display = "none";
+            setDot("run");
+            agentLabel.textContent = "AI 正在运行...";
+            agentSub.textContent = `status=${status} • step=${step}`;
+            showFloat(true);
+          }
+
+          lastStatus = status;
+        }
+
+        // Jump button: route to AnnotationCanvas HIL 页面.
+        hilJumpBtn.addEventListener("click", () => {
+          const ui = (window.__lastHilUi || "AnnotationCanvas").toString();
+          const base =
+            ui === "ReceiptMatcher"
+              ? "/receipt.html"
+              : ui === "DesignBinder"
+                ? "/design.html"
+                : "/annotation.html";
+          window.location.href = base + "?taskId=" + encodeURIComponent(taskId);
+        });
+
+        function connect() {
+          const wsProto = location.protocol === "https:" ? "wss" : "ws";
+          const wsUrl = wsProto + "://" + location.host + "/ws/task/" + encodeURIComponent(taskId);
+          setWsState("连接 WebSocket...");
+
+          const ws = new WebSocket(wsUrl);
+
+          ws.onopen = () => {
+            setWsState("WebSocket 已连接");
+          };
+
+          ws.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data);
+              if (msg.type === "hydration" || msg.type === "task_update") {
+                setAgentUI(msg);
+                return;
+              }
+              if (msg.type === "progress") {
+                const p = msg.payload || {};
+                const cur = p.current ?? "-";
+                const total = p.total ?? "-";
+                const step = p.step_desc || p.step || "";
+                agentSub.textContent = `进度 ${cur}/${total}${step ? " • " + step : ""}`;
+                statusLine.textContent = agentSub.textContent;
+                showFloat(true);
+                setDot("run");
+                lastStatus = lastStatus || "RUNNING";
+                return;
+              }
+              if (msg.type === "error") {
+                hilBanner.style.display = "none";
+                setDot("err");
+                agentLabel.textContent = "任务不可用";
+                agentSub.textContent = msg.message || "未知错误";
+                showFloat(true);
+                setWsState("收到错误: " + (msg.message || ""));
+              }
+            } catch (e) {
+              console.warn("WS parse error", e);
+            }
+          };
+
+          ws.onclose = () => {
+            setWsState("WebSocket 已断开，正在重连...");
+            setTimeout(connect, 2000);
+          };
+
+          ws.onerror = () => {
+            setWsState("WebSocket 错误，稍后重连");
+          };
+
+          // Keep for debugging.
+          window.__ws = ws;
+        }
+
+        connect();
+      })();
+    </script>
+  </body>
+</html>
+
