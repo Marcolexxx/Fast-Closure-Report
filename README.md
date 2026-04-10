@@ -1,13 +1,12 @@
 # AI Copilot Platform (Fast-Closure-Report)
 
+[🇨🇳 简体中文](#-简体中文) | [🇺🇸 English](#-english)
+
 > 面向中小型企业 AI Agent 框架，用于解决项目结案报告而生，攻克从“报价-交付”核对到多用户报销审计的所有难题；
 >
 > 基于Librarian + PostgreSQL JSONB 进行 Memory 自动进化学习，支持 Skill 与 Tools 的拓展与热插拔。
->
->
-> An AI Agent framework tailored for SMBs, purpose-built to automate project closure reports and tackle everything from quote-to-delivery reconciliations to multi-user expense audits. Powered by a Librarian + PostgreSQL JSONB architecture for self-evolving memory, it fully supports the seamless expansion and hot-plugging of Skills and Tools.
 
-[🇨🇳 简体中文](#-简体中文) | [🇺🇸 English](#-english)
+> An AI Agent framework tailored for SMBs, purpose-built to automate project closure reports and tackle everything from quote-to-delivery reconciliations to multi-user expense audits. Powered by a Librarian + PostgreSQL JSONB architecture for self-evolving memory, it fully supports the seamless expansion and hot-plugging of Skills and Tools.
 
 ---
 
