@@ -17,16 +17,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import AuditLog, PPTTemplate, User
 from app.security.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/admin/templates", tags=["admin-templates"])
 logger = logging.getLogger(__name__)
 
-
-def _sm() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(get_engine(), expire_on_commit=False, class_=AsyncSession)
+# Use global session maker
+_sm = get_session_maker
 
 
 def _tpl_dict(t: PPTTemplate) -> dict[str, Any]:

@@ -121,14 +121,38 @@ def parse_spreadsheet(file_path: str, sheet_name: Optional[str] = None) -> List[
         _fill_merged_cells(sheet)
         
         # Convert fixed sheet back to Pandas DF via generator
-        data = sheet.values  # type: ignore
-        cols = next(data) # First row as headers
-        df = pd.DataFrame(data, columns=cols)
+        data = list(sheet.values)  # type: ignore
+        if not data:
+            raise ValueError("Empty excel document")
+
+        # Heuristic header row detection
+        best_row_idx = 0
+        best_header_score = 0
+        
+        # known targets to score rows
+        targets = {"物料", "品名", "名称", "name", "item", "数量", "qty", "quantity", "目标数量", "target", "数目", "单价", "price", "unit", "类别", "类型", "category", "type"}
+        
+        for i in range(min(15, len(data))):
+            row = data[i]
+            score = 0
+            for cell in row:
+                c_str = str(cell).strip().lower()
+                if c_str in targets or any(kw in c_str for kw in targets):
+                    score += 1
+            if score > best_header_score:
+                best_header_score = score
+                best_row_idx = i
+                
+        cols = data[best_row_idx]
+        cols = [f"col_{j}" if c is None else str(c).strip() for j, c in enumerate(cols)]
+        
+        df = pd.DataFrame(data[best_row_idx+1:], columns=cols)
     else:
         raise ValueError(f"Unsupported spreadsheet extension: {ext}")
 
-    # Normalize columns
-    df.columns = [str(c).strip() for c in df.columns]
+    # Normalize columns explicitly (to handle unnamed correctly if duplicate)
+    s = pd.Series(df.columns)
+    df.columns = s.where(~s.duplicated(), s + "_" + s.groupby(s).cumcount().astype(str))
 
     # Matching column dictionaries
     col_name = pick_col(df, ["物料", "品名", "名称", "name", "item"])

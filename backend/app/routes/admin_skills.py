@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import AuditLog, SkillConfig, User
 from app.security.deps import get_current_user, require_admin
 from app.skills.registry import get_skill_registry_service
@@ -28,9 +28,8 @@ from app.skills.registry import get_skill_registry_service
 router = APIRouter(prefix="/admin/skills", tags=["admin-skills"])
 logger = logging.getLogger(__name__)
 
-
-def _sm() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(get_engine(), expire_on_commit=False, class_=AsyncSession)
+# Use global session maker
+_sm = get_session_maker
 
 
 async def _write_audit(actor: User, action: str, skill_id: str, detail: dict) -> None:

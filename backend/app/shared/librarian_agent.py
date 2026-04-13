@@ -4,14 +4,10 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 from sqlalchemy import text
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
-
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def _query_top_k_experiences(skill_id: str, search_query: str, k: int = 5) -> List[Dict[str, Any]]:
     """

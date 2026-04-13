@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib.util
 import os
@@ -10,16 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import SkillConfig
 from app.skills.skill_models import SkillJson
 from app.tools.registry import get_tool_registry
-
-
-@lru_cache(maxsize=1)
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 def _sanitize_module_name(s: str) -> str:

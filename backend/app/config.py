@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from functools import lru_cache
 from typing import Optional
 
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     tz: str = "UTC"
 
     # Security (used in later phases)
-    secret_key: str = "dev-secret-change-me"
+    secret_key: str = os.environ.get("SECRET_KEY", secrets.token_hex(32))
     access_token_expire_hours: int = 8
     refresh_token_expire_days: int = 30
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000"]

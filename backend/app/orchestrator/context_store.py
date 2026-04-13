@@ -1,20 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
-from functools import lru_cache
-from typing import Any, Dict
+from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db import get_engine
+from app.db import get_session_maker
 from app.models import TaskContext
-
-
-@lru_cache(maxsize=1)
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def load_task_context(task_id: str) -> dict[str, Any]:
@@ -23,20 +15,27 @@ async def load_task_context(task_id: str) -> dict[str, Any]:
         if not row or not row.context_json:
             return {}
         try:
-            return json.loads(row.context_json.decode("utf-8"))
+            data = json.loads(row.context_json.decode("utf-8"))
+            data["_schema_version"] = row.schema_version
+            return data
         except Exception:
             return {}
 
 
 async def save_task_context(task_id: str, data: dict[str, Any], schema_version: int = 1) -> None:
+    expected_version = data.pop("_schema_version", None)
     payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    
+    from app.db import get_session_maker
     async with get_session_maker()() as session:
         row = (await session.execute(select(TaskContext).where(TaskContext.task_id == task_id))).scalars().first()
         if not row:
-            row = TaskContext(task_id=task_id, context_json=payload, schema_version=schema_version)
+            row = TaskContext(task_id=task_id, context_json=payload, schema_version=1)
             session.add(row)
         else:
+            if expected_version is not None and row.schema_version != expected_version:
+                raise RuntimeError(f"Optimistic lock failed: expected {expected_version}, got {row.schema_version}")
             row.context_json = payload
-            row.schema_version = schema_version
+            row.schema_version += 1
         await session.commit()
 

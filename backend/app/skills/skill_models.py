@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import List, Literal, Optional
 
@@ -14,6 +14,7 @@ class SkillToolSpec(BaseModel):
     type: ToolType
     ui: Optional[str] = None
     async_: Optional[bool] = Field(default=None, alias="async")
+    input_mappings: dict[str, str] = Field(default_factory=dict)
 
     class Config:
         populate_by_name = True

@@ -10,18 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import jwt
 
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import User, UserRole
 from app.security.auth import decode_token
 
 _bearer = HTTPBearer(auto_error=False)
-
-
-@lru_cache(maxsize=1)
-def _get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
@@ -40,10 +33,18 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong token type")
 
     user_id: str = payload.get("sub", "")
-    async with _get_session_maker()() as session:
-        user = await session.get(User, user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    role: str = payload.get("role", UserRole.EXECUTOR.value)
+    username: str = payload.get("username", "")
+    department_id: Optional[str] = payload.get("department_id")
+
+    user = User(
+        username=username,
+        role=role,
+        department_id=department_id,
+    )
+    user.id = user_id
+    user.is_active = True
+
     return user
 
 

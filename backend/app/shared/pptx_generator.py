@@ -74,7 +74,7 @@ def draw_bounding_boxes(image_path: str, boxes: List[Dict], out_path: str) -> bo
         logger.error(f"Failed to draw bounding box on {image_path}: {e}")
         return False
 
-def generate_report_pptx(task_id: str, items: List[Dict], receipts: dict, template_id: str = "default") -> str:
+def generate_report_pptx(task_id: str, items: List[Dict], receipts: dict, template_path: str = "") -> str:
     """
     Core PPTX renderer generating the full report and applying bounding boxes.
     Outputs to FILE_STORAGE_ROOT/aicopilot/<task_id>/
@@ -82,7 +82,9 @@ def generate_report_pptx(task_id: str, items: List[Dict], receipts: dict, templa
     """
     out_dir = Path(os.environ.get("FILE_STORAGE_ROOT", "/data")) / "aicopilot" / str(task_id)
     out_dir.mkdir(parents=True, exist_ok=True)
-    pptx_path = str(out_dir / f"output_{template_id}.pptx")
+    
+    import time
+    pptx_path = str(out_dir / f"output_{int(time.time())}.pptx")
     
     try:
         from pptx import Presentation  # type: ignore
@@ -91,110 +93,68 @@ def generate_report_pptx(task_id: str, items: List[Dict], receipts: dict, templa
     except Exception as e:
         raise RuntimeError("Missing python-pptx dependency") from e
 
-    prs = Presentation()
-    
-    # Slide 1: Cover
-    title_slide = prs.slides.add_slide(prs.slide_layouts[0])
-    title_slide.shapes.title.text = "活动项目智能结案报告"
-    title_slide.placeholders[1].text = f"由 AI Copilot 自动生成 | 任务 ID: {task_id}"
+    if template_path and os.path.exists(template_path):
+        prs = Presentation(template_path)
+    else:
+        prs = Presentation()
 
-    # Slide 2: Material Execution List
-    slide = prs.slides.add_slide(prs.slide_layouts[5])  # Title only
-    slide.shapes.title.text = "物料执行清单与照片证明"
-    tx = slide.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9.0), Inches(5.5)).text_frame
-    tx.word_wrap = True
+    # Dynamic template filling logic
+    # We iterate over all existing slides and shapes.
+    # We replace text based on heuristics and insert pictures if we find picture/object placeholders.
     
-    for it in items[:15]:  # Show top 15 materials for brevity
-        p = tx.add_paragraph()
-        name = it.get('name', '')
-        target = it.get('target_qty', 0)
-        actual = it.get('actual_qty', target)
-        status = "✅ 达标" if actual >= target else "⚠️ 异常"
-        p.text = f"• {name} | 目标: {target} | 实际: {actual} | 状态: {status}"
-        p.font.size = Pt(14)
-        
-    # Slide 2.x: Images for Material Execution
-    pic_layout = None
-    pic_placeholder_idx = -1
-    text_placeholder_idx = -1
-    
-    for layout in prs.slide_layouts:
-        has_pic = False
-        p_idx = -1
-        t_idx = -1
-        for shape in layout.placeholders:
-            if shape.placeholder_format.type == PP_PLACEHOLDER.PICTURE:
-                has_pic = True
-                p_idx = shape.placeholder_format.idx
-            elif shape.placeholder_format.type in (PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.TITLE):
-                t_idx = shape.placeholder_format.idx
-        if has_pic:
-            pic_layout = layout
-            pic_placeholder_idx = p_idx
-            text_placeholder_idx = t_idx
-            break
-
+    # Pre-compute data strings
+    items_summary = []
     for it in items[:15]:
-        img_path = it.get('design_image_path')
-        if not img_path or not os.path.exists(img_path):
-            continue
-            
         name = it.get('name', '')
         target = it.get('target_qty', 0)
         actual = it.get('actual_qty', target)
         status = "✅ 达标" if actual >= target else "⚠️ 异常"
-        info_text = f"名称: {name}\n目标数量: {target}\n实际数量: {actual}\n状态: {status}"
-
-        if pic_layout:
-            slide_pic = prs.slides.add_slide(pic_layout)
-            for shape in slide_pic.placeholders:
-                if shape.placeholder_format.idx == pic_placeholder_idx:
-                    try:
-                        shape.insert_picture(img_path)
-                    except Exception as e:
-                        logger.error(f"Failed to insert picture placeholder for {img_path}: {e}")
-                elif shape.placeholder_format.idx == text_placeholder_idx or shape.placeholder_format.type == PP_PLACEHOLDER.TITLE:
-                    shape.text = f"证明照片: {name}" if shape.placeholder_format.type == PP_PLACEHOLDER.TITLE else info_text
-        else:
-            slide_pic = prs.slides.add_slide(prs.slide_layouts[5])  # Title only
-            slide_pic.shapes.title.text = f"物料执行证明: {name}"
-            tx_pic = slide_pic.shapes.add_textbox(Inches(0.5), Inches(2.0), Inches(3.5), Inches(4.0)).text_frame
-            tx_pic.text = info_text
-            try:
-                # Add adaptive picture to right side
-                slide_pic.shapes.add_picture(img_path, Inches(4.5), Inches(1.5), width=Inches(5.0))
-            except Exception as e:
-                logger.error(f"Failed to add picture {img_path}: {e}")
-
-    # Slide 3: Finance Matches
-    slide2 = prs.slides.add_slide(prs.slide_layouts[5])
-    slide2.shapes.title.text = "财务凭据匹配摘要"
+        items_summary.append(f"• {name} | 目标: {target} | 实际: {actual} | 状态: {status}")
+    items_text = "\n".join(items_summary)
     
     matches = receipts.get("matches", [])
     unmatched = receipts.get("unmatched", [])
-    
-    tx2 = slide2.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9.0), Inches(5.5)).text_frame
-    tx2.word_wrap = True
-    
-    p = tx2.add_paragraph()
-    p.text = f"匹配成功：{len(matches)} 笔 | 异常未匹配：{len(unmatched)} 笔"
-    p.font.size = Pt(16)
-    p.font.bold = True
-    
-    tx2.add_paragraph().text = ""
-    
-    for m in matches[:10]:
-        p = tx2.add_paragraph()
+    fin_summary = f"匹配成功：{len(matches)} 笔 | 异常未匹配：{len(unmatched)} 笔\n"
+    for m in matches[:5]:
         pmt = m.get("payment", {})
         inv = m.get("invoice", {})
-        amount = pmt.get("amount") or inv.get("amount")
-        p.text = f"[匹配成功] 交易: {pmt.get('date')} ￥{amount} <=> 发票号: {inv.get('invoice_no')}"
-        p.font.size = Pt(12)
+        fin_summary += f"[匹配成功] 交易: {pmt.get('date')} ￥{pmt.get('amount') or inv.get('amount')} <=> 发票号: {inv.get('invoice_no')}\n"
+    for u in unmatched[:5]:
+        fin_summary += f"[待人工确认] 未匹配资产 | 类型: {u.get('type')} ￥{u.get('amount')}\n"
 
-    for u in unmatched[:10]:
-        p = tx2.add_paragraph()
-        p.text = f"[待人工确认] 未匹配资产 | 类型: {u.get('type')} ￥{u.get('amount')}"
-        p.font.size = Pt(12)
+    # Available images to fill
+    available_images = [it.get('design_image_path') for it in items if it.get('design_image_path') and os.path.exists(it.get('design_image_path'))]
+    img_idx = 0
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not shape.is_placeholder:
+                continue
+                
+            ph_type = shape.placeholder_format.type
+            
+            # Fill Text Placeholders (Title, Body, Center Title, Subtitle, Object, Content)
+            if ph_type in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE, PP_PLACEHOLDER.SUBTITLE):
+                text = shape.text.lower()
+                if "title" in text or "标题" in text or not text:
+                    shape.text = "活动项目智能结案报告"
+            elif ph_type in (PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT):
+                text = shape.text.lower()
+                if "物料" in text or "清单" in text or "items" in text or "list" in text:
+                    shape.text = items_text
+                elif "财务" in text or "凭据" in text or "finance" in text or "receipt" in text:
+                    shape.text = fin_summary
+                elif not text or "content" in text:
+                    shape.text = f"由 AI Copilot 自动生成 | 任务 ID: {task_id}"
+            
+            # Fill Picture Placeholders
+            elif ph_type in (PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.OBJECT):
+                if img_idx < len(available_images):
+                    try:
+                        shape.insert_picture(available_images[img_idx])
+                        img_idx += 1
+                    except Exception as e:
+                        logger.error(f"Failed to insert picture into placeholder: {e}")
 
     # PRD §7.3 Tool 11: 原子写入，防止并发读到中间态
     _atomic_save_pptx(prs, pptx_path)

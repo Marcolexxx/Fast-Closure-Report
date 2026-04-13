@@ -13,6 +13,7 @@ from app.db import test_db_connection
 from app.db_init import init_task_schema
 from app.logging_setup import configure_logging
 from app.middleware_trace_id import trace_id_middleware
+import os
 from app.routes.tasks import router as tasks_router
 from app.routes.tasks_create import router as tasks_create_router
 from app.routes.ws_task import router as ws_task_router
@@ -67,10 +68,10 @@ app.middleware("http")(trace_id_middleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_settings().cors_origins,
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Trace-Id"],
 )
 
 app.include_router(auth_router)
@@ -109,8 +110,11 @@ async def _startup_checks() -> None:
             admin = result.scalars().first()
             if not admin:
                 logger.info("seed_admin_creating")
+                admin_pw = os.environ.get("ADMIN_BOOTSTRAP_PASSWORD")
+                if not admin_pw:
+                    raise RuntimeError("ADMIN_BOOTSTRAP_PASSWORD not set but admin account missing!")
                 admin = User(username="admin", role=UserRole.ADMIN.value)
-                admin.hashed_password = hash_password("admin123")
+                admin.hashed_password = hash_password(admin_pw)
                 session.add(admin)
                 await session.commit()
                 logger.info("seed_admin_created")

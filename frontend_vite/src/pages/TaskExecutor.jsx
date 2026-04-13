@@ -24,30 +24,45 @@ export default function TaskExecutor() {
     prefill: null
   })
 
+  const [reconnectCount, setReconnectCount] = useState(0)
+
   useEffect(() => {
-    const ws = connectTaskWs(id, (msg) => {
-      // Handle Hydration + Updates + Progress
-      if (['hydration', 'task_update'].includes(msg.type)) {
-        setState(s => ({ ...s, ...msg }))
-        
-        // Fetch specific payload for HIL state immediately if we enter human block
-        if (msg.status === 'WAITING_HUMAN' || msg.status === 'PAUSED_HIL') {
-           tasks.getHilState(id).then(res => {
-              if (res.data) {
-                 setState(s => ({ ...s, prefill: res.data.payload_json }))
-              }
-           }).catch(console.error)
+    let ws
+    const connect = () => {
+      ws = connectTaskWs(id, (msg) => {
+        if (msg.type === 'reconnect_attempt') {
+          // WS closed, reconnect
+          setReconnectCount(c => c + 1)
+          return
         }
-        
-      } else if (msg.type === 'progress') {
-        console.log('Progress:', msg.payload)
-      } else if (msg.type === 'error') {
-        console.error('WS Error:', msg)
-        setState(s => ({...s, status: 'ERROR'}))
-      }
-    })
-    return () => ws.close()
-  }, [id])
+        // Handle Hydration + Updates + Progress
+        if (['hydration', 'task_update'].includes(msg.type)) {
+          setState(s => ({ ...s, ...msg }))
+          
+          // Fetch specific payload for HIL state immediately if we enter human block
+          if (msg.status === 'WAITING_HUMAN') {
+             tasks.getHilState(id).then(res => {
+                if (res?.hil) {
+                   setState(s => ({ ...s, 
+                     ui_component: res.hil.ui_component || s.ui_component,
+                     reasoning_summary: res.hil.reasoning_summary || s.reasoning_summary,
+                     prefill: res.hil.prefill || {} 
+                   }))
+                }
+             }).catch(console.error)
+          }
+          
+        } else if (msg.type === 'progress') {
+          console.log('Progress:', msg.payload)
+        } else if (msg.type === 'error') {
+          console.error('WS Error:', msg)
+          setState(s => ({...s, status: 'ERROR'}))
+        }
+      })
+    }
+    connect()
+    return () => { if (ws) ws.close() }
+  }, [id, reconnectCount])
 
   const handleHilSubmit = async (payloadData) => {
      try {

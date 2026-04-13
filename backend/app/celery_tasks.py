@@ -16,18 +16,39 @@ from app.skills.registry import get_skill_registry_service
 from app.orchestrator.context_store import load_task_context, save_task_context
 
 
-_SKILL_REGISTRY_LOADED = False
-
-
-def _ensure_skill_registry_loaded() -> None:
-    global _SKILL_REGISTRY_LOADED
-    if _SKILL_REGISTRY_LOADED:
-        return
+def run_async(coro):
     import asyncio
-
-    service = get_skill_registry_service()
-    asyncio.run(service.load_all())
-    _SKILL_REGISTRY_LOADED = True
+    import threading
+    
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+    if loop.is_running():
+        result_container = []
+        error_container = []
+        
+        def thread_task():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                result_container.append(new_loop.run_until_complete(coro))
+            except Exception as e:
+                error_container.append(e)
+            finally:
+                new_loop.close()
+                
+        t = threading.Thread(target=thread_task)
+        t.start()
+        t.join()
+        
+        if error_container:
+            raise error_container[0]
+        return result_container[0]
+        
+    return loop.run_until_complete(coro)
 
 
 def _get_redis_sync_client() -> redis.Redis:
@@ -43,9 +64,7 @@ def _progress_channel(task_id: str) -> str:
     return f"task:{task_id}:progress"
 
 
-def _session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+from app.db import get_session_maker as _session_maker
 
 
 @celery_app.task(name="run_ai_detection_async")
@@ -61,8 +80,6 @@ def run_ai_detection_async(task_id: str, input_data: Dict[str, Any]) -> Dict[str
     redis_client = _get_redis_sync_client()
     payload_base = {"task_id": task_id, "tool_name": "run_ai_detection", "timestamp": datetime.utcnow().isoformat()}
     redis_client.publish(_progress_channel(task_id), json.dumps({**payload_base, "type": "progress", "current": 0, "total": 100, "step_desc": "queued"}))
-
-    _ensure_skill_registry_loaded()
 
     async def _run() -> Dict[str, Any]:
         session_maker = _session_maker()
@@ -89,9 +106,11 @@ def run_ai_detection_async(task_id: str, input_data: Dict[str, Any]) -> Dict[str
             )
             
             if tool_result.success:
-                # Fire the runner again from the worker
-                from app.orchestrator.runner import run_task
-                await run_task(task_id)
+                # Fire the runner properly as event instead of recursive run
+                redis_client.publish(
+                    "orchestrator:trigger",
+                    json.dumps({"task_id": task_id})
+                )
 
             return {
                 "success": tool_result.success,
@@ -99,9 +118,8 @@ def run_ai_detection_async(task_id: str, input_data: Dict[str, Any]) -> Dict[str
                 "data": tool_result.data,
             }
 
-    # Run async tool runner in this sync Celery task.
-    import asyncio
-    result = asyncio.run(_run())
+    # Run async tool runner safely
+    result = run_async(_run())
 
     redis_client.publish(
         _progress_channel(task_id),
@@ -156,8 +174,7 @@ def resource_gc_task() -> Dict[str, Any]:
             await session.commit()
         return {"deleted_assets": deleted_count}
 
-    import asyncio
-    result = asyncio.run(_run_gc())
+    result = run_async(_run_gc())
     return result
 
 
@@ -179,9 +196,12 @@ def pattern_miner_task() -> Dict[str, Any]:
         async with session_maker() as session:
             from app.models import FeedbackEvent, PatternReport
 
+            import datetime
+            from datetime import timedelta
+            cutoff = datetime.datetime.utcnow() - timedelta(minutes=15)
             count_q = (
                 select(FeedbackEvent.skill_id, func.count(FeedbackEvent.id).label("cnt"))
-                .where(FeedbackEvent.skill_id.isnot(None))
+                .where(FeedbackEvent.skill_id.isnot(None), FeedbackEvent.created_at >= cutoff)
                 .group_by(FeedbackEvent.skill_id)
             )
             skill_counts = (await session.execute(count_q)).all()
@@ -237,7 +257,7 @@ def pattern_miner_task() -> Dict[str, Any]:
 
         return {"reports_created": reports_created}
 
-    result = asyncio.run(_run_miner())
+    result = run_async(_run_miner())
     return result
 
 
@@ -296,7 +316,7 @@ def extract_librarian_experience_task(feedback_id: str) -> Dict[str, Any]:
             await session.commit()
             return {"status": "ok", "knowledge_id": knowledge.id}
 
-    return asyncio.run(_run_extract())
+    return run_async(_run_extract())
 
 
 @celery_app.task(name="librarian_nightly_patrol")
@@ -347,17 +367,18 @@ def librarian_nightly_patrol() -> Dict[str, Any]:
                     cluster_key = tokens[0].lower() if tokens else "general"
                     cluster_map[cluster_key].append(leaf)
 
+                parent_q = select(LibrarianKnowledge).where(
+                    LibrarianKnowledge.skill_id == skill_id,
+                    LibrarianKnowledge.parent_id.is_(None),
+                    LibrarianKnowledge.knowledge_json.is_(None),
+                )
+                all_parents = (await session.execute(parent_q)).scalars().all()
+
                 for cluster_key, cluster_leaves in cluster_map.items():
                     if len(cluster_leaves) < 2:
                         continue
 
-                    parent_q = select(LibrarianKnowledge).where(
-                        LibrarianKnowledge.skill_id == skill_id,
-                        LibrarianKnowledge.parent_id.is_(None),
-                        LibrarianKnowledge.knowledge_json.is_(None),
-                        LibrarianKnowledge.keywords.contains(cluster_key),
-                    )
-                    existing_parent = (await session.execute(parent_q)).scalars().first()
+                    existing_parent = next((p for p in all_parents if p.keywords and cluster_key in p.keywords.lower()), None)
 
                     if not existing_parent:
                         summaries = "; ".join(l.summary[:80] for l in cluster_leaves[:5])
@@ -389,7 +410,7 @@ def librarian_nightly_patrol() -> Dict[str, Any]:
 
         return {"nodes_created": nodes_created, "nodes_linked": nodes_linked}
 
-    return asyncio.run(_run_patrol())
+    return run_async(_run_patrol())
 
 
 @celery_app.task(name="task_guardian_patrol")
@@ -437,4 +458,4 @@ def task_guardian_patrol() -> Dict[str, Any]:
                 
         return {"rescued_zombies": rescued_count}
 
-    return asyncio.run(_run_guardian())
+    return run_async(_run_guardian())

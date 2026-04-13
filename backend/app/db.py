@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 from functools import lru_cache
 from typing import Optional
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 
@@ -22,6 +22,12 @@ def get_engine() -> AsyncEngine:
         pool_recycle=3600,
         future=True,
     )
+
+
+@lru_cache(maxsize=1)
+def get_session_maker() -> async_sessionmaker[AsyncSession]:
+    engine = get_engine()
+    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def test_db_connection(timeout_s: float = 2.0) -> tuple[bool, Optional[str]]:

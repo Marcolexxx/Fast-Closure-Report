@@ -20,10 +20,7 @@ from app.shared.librarian_agent import run_librarian_rescue
 from app.redis_lock import get_redis_client
 
 
-@lru_cache(maxsize=1)
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+from app.db import get_engine, get_session_maker
 
 
 def _tool_ns(skill_id: str, tool_name: str) -> str:
@@ -91,36 +88,14 @@ async def _get_task(task_id: str) -> Optional[AgentTask]:
         return await session.get(AgentTask, task_id)
 
 
-def _skillA_inputs(tool_name: str, ctx: dict[str, Any]) -> dict[str, Any]:
-    # Minimal wiring to make the chain runnable with current MVP tools.
-    if tool_name == "parse_excel":
-        return ctx.get("parse_excel_input", {})
-    if tool_name == "classify_assets":
-        return {"assets": ctx.get("assets", [])}
-    if tool_name == "fetch_cloud_album":
-        return ctx.get("fetch_cloud_album_input", {"url": ctx.get("cloud_album_url", "demo"), "max_images": 2})
-    if tool_name == "run_ai_detection":
-        return {"assets": ctx.get("assets", []), "item_names": [i.get("name") for i in ctx.get("items", [])]}
-    if tool_name == "bind_design_images":
-        return {"items": ctx.get("items", []), "design_images": ctx.get("design_images", [])}
-    if tool_name == "request_annotation":
-        return {"detections": ctx.get("detections", [])}
-    if tool_name == "validate_quantity":
-        return {"items": ctx.get("items", []), "actuals": ctx.get("actuals", {})}
-    if tool_name == "ocr_receipt":
-        return ctx.get("ocr_input", {})
-    if tool_name == "match_receipts":
-        return {"receipts": ctx.get("receipts", [])}
-    if tool_name == "request_receipt_confirm":
-        return {"matches": ctx.get("matches", []), "unmatched": ctx.get("unmatched", [])}
-    if tool_name == "generate_ppt":
-        return {"template_id": ctx.get("template_id", "default"), "items": ctx.get("items", []), "receipts": ctx.get("receipts", [])}
-    if tool_name == "submit_review":
-        return {"pptx_path": ctx.get("pptx_path", ""), "comment": ctx.get("review_comment", "")}
-    return {}
-
-
-    pass
+def _get_dynamic_inputs(tool_spec: Any, tool_name: str, ctx: dict[str, Any]) -> dict[str, Any]:
+    # Dynamic mapper: A-1 fixes.
+    mapping = getattr(tool_spec, "input_mappings", None)
+    if mapping:
+        return {k: ctx.get(v) for k, v in mapping.items()}
+    
+    # Fallback to passing full context if no explicit mappings are provided in skill.json
+    return {**ctx}
 
 
 async def run_task(task_id: str) -> None:
@@ -159,7 +134,7 @@ async def run_task(task_id: str) -> None:
         # HIL: pause and expose UI.
         if tool_spec.type == "human_in_loop":
             # Run the tool once to produce prefill payload (it returns success with hil data).
-            input_data = _skillA_inputs(tool_name, ctx)
+            input_data = _get_dynamic_inputs(tool_spec, tool_name, ctx)
             tool_ctx = ToolTaskContext(task_id=task_id, user_id=task.user_id, trace_id=task.trace_id, logger=logger)
             result = await execute_tool(full_tool_name, input_data, tool_ctx)
 
@@ -175,7 +150,7 @@ async def run_task(task_id: str) -> None:
             return
 
         # AUTO tools
-        input_data = _skillA_inputs(tool_name, ctx)
+        input_data = _get_dynamic_inputs(tool_spec, tool_name, ctx)
 
         if tool_spec.async_ and tool_name == "run_ai_detection":
             try:

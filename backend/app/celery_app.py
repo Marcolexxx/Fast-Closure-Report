@@ -18,6 +18,13 @@ celery_app = Celery(
 celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"
 
+celery_app.conf.task_routes = {
+    'resource_gc_task': {'queue': 'beat_tasks'},
+    'pattern_miner_task': {'queue': 'beat_tasks'},
+    'librarian_nightly_patrol': {'queue': 'beat_tasks'},
+    'task_guardian_patrol': {'queue': 'beat_tasks'},
+}
+
 from celery.schedules import crontab
 
 celery_app.conf.beat_schedule = {
@@ -43,4 +50,15 @@ celery_app.conf.beat_schedule = {
 
 # Import task modules so Celery registers them on worker startup.
 import app.celery_tasks  # noqa: E402,F401
+
+from celery.signals import worker_process_init
+
+@worker_process_init.connect
+def init_worker(**kwargs):
+    import asyncio
+    from app.skills.registry import get_skill_registry_service
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    service = get_skill_registry_service()
+    loop.run_until_complete(service.load_all())
 

@@ -23,6 +23,7 @@ services:
       - REDIS_URL=${REDIS_URL}
       - FILE_STORAGE_ROOT=${FILE_STORAGE_ROOT}
       - TZ=${TZ}
+      - ADMIN_BOOTSTRAP_PASSWORD=${ADMIN_BOOTSTRAP_PASSWORD}
     ports:
       - "8000:8000"
     depends_on:

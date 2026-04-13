@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
@@ -9,17 +9,11 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import ToolCallLog, ToolCallLogStatus
 from app.tools.base import TaskContext, ToolResult
 from app.tools.errors import BusinessError
 from app.tools.registry import get_tool_registry
-
-
-@lru_cache(maxsize=1)
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 def _digest_input(input_data: dict) -> str:
@@ -52,11 +46,9 @@ async def execute_tool(tool_name: str, input_data: dict, context: TaskContext) -
         )
         existing = (await session.execute(existing_stmt)).scalars().first()
         if existing and existing.status == ToolCallLogStatus.SUCCESS.value:
-            return ToolResult(
-                success=True,
-                data={},
-                summary=(existing.output_summary or "")[:200],
-            )
+            # PRD: Disabled empty bypass early return (A-4). 
+            # In fully implemented version, we either fetch from Context or deserialize output_json.
+            pass
 
         start = time.time()
         result: ToolResult

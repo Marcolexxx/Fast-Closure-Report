@@ -5,12 +5,12 @@ from functools import lru_cache
 from typing import Any
 
 import jwt
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import User, UserRole
 from app.security.auth import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.security.deps import get_current_user
@@ -18,10 +18,8 @@ from app.security.deps import get_current_user
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
-
-@lru_cache(maxsize=1)
-def _session_maker() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(get_engine(), expire_on_commit=False, class_=AsyncSession)
+# Use the global session maker
+_session_maker = get_session_maker
 
 
 class LoginRequest(BaseModel):
@@ -38,11 +36,11 @@ class RegisterRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    pass # Empty as we will use cookie
 
 
 @router.post("/login")
-async def login(body: LoginRequest) -> dict[str, Any]:
+async def login(body: LoginRequest, response: Response) -> dict[str, Any]:
     async with _session_maker()() as session:
         result = await session.execute(select(User).where(User.username == body.username))
         user = result.scalars().first()
@@ -52,9 +50,14 @@ async def login(body: LoginRequest) -> dict[str, Any]:
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account inactive")
 
+    access_token = create_access_token(user.id, user.role, user.username, user.department_id)
+    refresh_token = create_refresh_token(user.id)
+    response.set_cookie(
+        key="refresh_token", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="lax", path="/"
+    )
+
     return {
-        "access_token": create_access_token(user.id, user.role),
-        "refresh_token": create_refresh_token(user.id),
+        "access_token": access_token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
@@ -66,7 +69,10 @@ async def login(body: LoginRequest) -> dict[str, Any]:
 
 
 @router.post("/register")
-async def register(body: RegisterRequest) -> dict[str, Any]:
+async def register(body: RegisterRequest, response: Response) -> dict[str, Any]:
+    if body.role == UserRole.ADMIN.value:
+        raise HTTPException(status_code=403, detail="Cannot self-register as admin")
+
     async with _session_maker()() as session:
         existing = (await session.execute(select(User).where(User.username == body.username))).scalars().first()
         if existing:
@@ -83,18 +89,27 @@ async def register(body: RegisterRequest) -> dict[str, Any]:
         await session.commit()
         await session.refresh(user)
 
+    access_token = create_access_token(user.id, user.role, user.username, user.department_id)
+    refresh_token = create_refresh_token(user.id)
+    response.set_cookie(
+        key="refresh_token", value=refresh_token, httponly=True, max_age=30*24*3600, samesite="lax", path="/"
+    )
+
     return {
-        "access_token": create_access_token(user.id, user.role),
-        "refresh_token": create_refresh_token(user.id),
+        "access_token": access_token,
         "token_type": "bearer",
         "user": {"id": user.id, "username": user.username, "role": user.role},
     }
 
 
 @router.post("/refresh")
-async def refresh(body: RefreshRequest) -> dict[str, Any]:
+async def refresh(request: Request, response: Response) -> dict[str, Any]:
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token missing")
+
     try:
-        payload = decode_token(body.refresh_token)
+        payload = decode_token(refresh_token)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Refresh token expired")
     except jwt.PyJWTError:
@@ -109,11 +124,17 @@ async def refresh(body: RefreshRequest) -> dict[str, Any]:
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found")
 
+    access_token = create_access_token(user.id, user.role, user.username, user.department_id)
     return {
-        "access_token": create_access_token(user.id, user.role),
+        "access_token": access_token,
         "token_type": "bearer",
     }
 
+
+@router.post("/logout")
+async def logout(response: Response) -> dict[str, Any]:
+    response.delete_cookie(key="refresh_token", path="/")
+    return {"status": "ok"}
 
 @router.get("/me")
 async def me(current_user: User = Depends(get_current_user)) -> dict[str, Any]:

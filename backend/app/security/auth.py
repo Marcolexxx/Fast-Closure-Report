@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import jwt
-from passlib.context import CryptContext
 
 from app.config import get_settings
 
@@ -28,12 +27,14 @@ def _secret() -> str:
     return get_settings().secret_key
 
 
-def create_access_token(user_id: str, role: str) -> str:
+def create_access_token(user_id: str, role: str, username: str = "", department_id: Optional[str] = None) -> str:
     settings = get_settings()
     expire = datetime.utcnow() + timedelta(hours=settings.access_token_expire_hours)
     payload = {
         "sub": user_id,
         "role": role,
+        "username": username,
+        "department_id": department_id,
         "exp": expire,
         "type": "access",
     }

@@ -10,18 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import AgentTask, TaskHilState, TaskStatus, User, UserRole
 from app.redis_lock import get_redis_client
 from app.security.auth import decode_token
 
 router = APIRouter(prefix="")
-
-
-@lru_cache(maxsize=1)
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def _load_task(session: AsyncSession, task_id: str) -> Optional[AgentTask]:
@@ -49,9 +43,18 @@ async def ws_task(websocket: WebSocket, task_id: str) -> None:
     progress_channel = f"task:{task_id}:progress"
 
     await websocket.accept()
+    
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
+        if auth_msg.get("type") != "auth":
+            await websocket.close(code=1008)
+            return
+        token = auth_msg.get("token", "")
+    except Exception:
+        await websocket.close(code=1008)
+        return
 
     async with get_session_maker()() as session:
-        token = websocket.query_params.get("token", "")
         payload = _decode_access_token(token)
         user_id = str(payload.get("sub", ""))
         if not user_id:
@@ -107,8 +110,26 @@ async def ws_task(websocket: WebSocket, task_id: str) -> None:
         # Subscribe Redis progress channel.
         await pubsub.subscribe(progress_channel)
 
-        # Non-blocking event loop using pubsub.listen()
-        async for message in pubsub.listen():
+        loop = asyncio.get_event_loop()
+        last_ping = loop.time()
+
+        while True:
+            # 1. Try Read from websocket (handles ping/pong and heartbeat)
+            try:
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                last_ping = loop.time()
+                # could reply to ping here if we wanted
+            except asyncio.TimeoutError:
+                pass
+            except WebSocketDisconnect:
+                break
+                
+            if loop.time() - last_ping > 60:
+                # Client timeout
+                break
+
+            # 2. Try Read from redis pubsub
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
             if message and message.get("type") == "message":
                 data = message.get("data")
                 if isinstance(data, (bytes, bytearray)):
@@ -151,10 +172,8 @@ async def ws_task(websocket: WebSocket, task_id: str) -> None:
                                 }
                             )
 
-            # Allow client-side ping/pong or future extension.
-            # We don't block on receive here to avoid backpressure complexity.
     except WebSocketDisconnect:
-        return
+        pass
     finally:
         try:
             await pubsub.unsubscribe(progress_channel)

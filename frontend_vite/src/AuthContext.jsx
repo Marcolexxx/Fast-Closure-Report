@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { auth as authApi } from './api'
+import { auth as authApi, setToken } from './api'
 
 const AuthCtx = createContext(null)
 
@@ -8,24 +8,39 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token')
-    if (!token) { setLoading(false); return }
-    authApi.me()
-      .then(setUser)
-      .catch(() => { localStorage.clear(); setUser(null) })
-      .finally(() => setLoading(false))
+    const initAuth = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.access_token) {
+            setToken(data.access_token)
+            const userData = await authApi.me()
+            setUser(userData)
+          }
+        }
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    initAuth()
   }, [])
 
   const login = useCallback(async (username, password) => {
     const data = await authApi.login(username, password)
-    localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
+    setToken(data.access_token)
     setUser(data.user)
     return data
   }, [])
 
-  const logout = useCallback(() => {
-    localStorage.clear()
+  const logout = useCallback(async () => {
+    await authApi.logout().catch(() => {})
+    setToken(null)
     setUser(null)
   }, [])
 

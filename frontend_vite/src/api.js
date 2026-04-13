@@ -1,8 +1,14 @@
 // ── API base client ─────────────────────────────────────────
 const BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 
+let inMemoryToken = null
+
+export function setToken(token) {
+  inMemoryToken = token
+}
+
 function getToken() {
-  return localStorage.getItem('access_token')
+  return inMemoryToken
 }
 
 async function request(method, path, body, opts = {}) {
@@ -15,13 +21,14 @@ async function request(method, path, body, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers,
+    credentials: 'include',  // Send HttpOnly cookies (refresh token)
     body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
   })
   if (res.status === 401) {
-    // Try refresh
+    // Try refresh via HttpOnly cookie (no localStorage needed)
     const refreshed = await tryRefresh()
     if (!refreshed) {
-      localStorage.clear()
+      setToken(null)
       window.location.href = '/login'
       throw new Error('Session expired')
     }
@@ -33,6 +40,7 @@ async function request(method, path, body, opts = {}) {
         ...headers,
         Authorization: `Bearer ${token2}`,
       },
+      credentials: 'include',
       body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
     })
     if (!res2.ok) throw await res2.json().catch(() => ({ detail: res2.statusText }))
@@ -46,18 +54,20 @@ async function request(method, path, body, opts = {}) {
 }
 
 async function tryRefresh() {
-  const rt = localStorage.getItem('refresh_token')
-  if (!rt) return false
+  // Refresh token is stored in HttpOnly cookie — just call the endpoint with credentials.
+  // No localStorage access needed.
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: rt }),
+      credentials: 'include',
     })
     if (!res.ok) return false
     const data = await res.json()
-    localStorage.setItem('access_token', data.access_token)
-    return true
+    if (data.access_token) {
+      setToken(data.access_token)
+      return true
+    }
+    return false
   } catch {
     return false
   }
@@ -68,6 +78,7 @@ export const auth = {
   login: (username, password) => request('POST', '/auth/login', { username, password }),
   register: (body) => request('POST', '/auth/register', body),
   me: () => request('GET', '/auth/me'),
+  logout: () => request('POST', '/auth/logout'),
 }
 
 // ── Projects ─────────────────────────────────────────────────
@@ -121,7 +132,7 @@ export const projects = {
 export const tasks = {
   create: (body) => request('POST', '/tasks', body),
   resume: (id) => request('POST', `/tasks/${id}/resume`),
-  getHil: (id) => request('GET', `/tasks/${id}/hil/current`),
+  getHilState: (id) => request('GET', `/tasks/${id}/hil/current`),
   submitHil: (id, body) => request('POST', `/tasks/${id}/hil/submit`, body),
 }
 
@@ -204,15 +215,29 @@ export const feedback = {
 // ── WS helper ────────────────────────────────────────────────
 export function connectTaskWs(taskId, onMessage) {
   const wsBase = BASE.replace(/^http/, 'ws')
-  const token = getToken() || ''
-  const ws = new WebSocket(`${wsBase}/ws/task/${taskId}?token=${encodeURIComponent(token)}`)
+  const ws = new WebSocket(`${wsBase}/ws/task/${taskId}`)
+  let ping;
+  
+  ws.onopen = () => {
+    const token = getToken() || ''
+    ws.send(JSON.stringify({ type: 'auth', token }))
+  }
+
   ws.onmessage = (e) => {
     try { onMessage(JSON.parse(e.data)) } catch {}
   }
-  // 30s ping/pong
-  const ping = setInterval(() => {
+  
+  ping = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
   }, 30000)
-  ws.onclose = () => clearInterval(ping)
+  
+  ws.onclose = () => {
+    clearInterval(ping)
+    // Add reconnect
+    setTimeout(() => {
+      onMessage({ type: 'reconnect_attempt' })
+      // Notice: reconnect is manually handled by caller if needed, or we just rely on parent component.
+    }, 5000)
+  }
   return ws
 }

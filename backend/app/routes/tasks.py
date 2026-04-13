@@ -8,19 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db import get_engine
+from app.db import get_engine, get_session_maker
 from app.models import AgentTask, TaskCheckpoint, TaskStatus, User, UserRole
 from app.orchestrator.runner import run_task
 from app.redis_lock import acquire_lock
 from app.security.deps import get_current_user
 
 router = APIRouter(prefix="", tags=["tasks"])
-
-
-@lru_cache(maxsize=1)
-def get_session_maker() -> async_sessionmaker[AsyncSession]:
-    engine = get_engine()
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 def _ensure_task_access(task: AgentTask, current_user: User) -> None:
